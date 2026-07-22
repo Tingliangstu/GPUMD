@@ -135,18 +135,22 @@ NetCDF setup
 ============
 
 To use `NetCDF <https://www.unidata.ucar.edu/software/netcdf/>`_ (see :ref:`dump_netcdf keyword <kw_dump_netcdf>`) with :program:`GPUMD`, a few extra steps must be taken before building :program:`GPUMD`.
-First, you must download and install the correct version of NetCDF.
-Currently, :program:`GPUMD` is coded to work with `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_ and it is recommended that this version is used (not newer versions).
+First, you must download and install a compatible version of NetCDF.
+:program:`GPUMD` requires netCDF-C 4.6.3 or later; version 4.6.3 remains a known-compatible baseline.
 
 The setup instructions are below:
 
-* Download `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_
+* Download `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_ or a `newer release <https://github.com/Unidata/netcdf-c/releases>`_.
 * Configure and build NetCDF.
   It is best to follow the instructions included with the software but, for the configuration, please use the following flags seen in our example line
 
   .. code:: bash
 
      ./configure --prefix=<path> --disable-netcdf-4 --disable-dap
+
+  This classic build supports the default ``compression none`` mode. To use the optional
+  ``compression deflate`` mode, build NetCDF-C with NetCDF4/HDF5 and zlib support instead by
+  omitting ``--disable-netcdf-4``. The remaining GPUMD setup is unchanged.
 
   Here, the :attr:`--prefix` determines the output directory of the build. Then make and install NetCDF:
 
@@ -171,6 +175,8 @@ The setup instructions are below:
      LIBS = -lcublas -lcusolver -l:libnetcdf.a
 
   where :attr:`<path>` should be replaced with the installation path for NetCDF (defined in :attr:`--prefix` of the ``./configure`` command).
+  For a NetCDF4-enabled shared-library build used with ``compression deflate``, replace
+  ``-l:libnetcdf.a`` with ``-lnetcdf``.
 * Follow the remaining :program:`GPUMD` installation instructions
 
 Following these steps will enable the :ref:`dump_netcdf keyword <kw_dump_netcdf>`.
