@@ -151,8 +151,10 @@ The setup instructions are below:
   This configuration supports the default uncompressed NetCDF output and avoids the
   additional HDF5 and zlib dependencies. To use the optional ``compression deflate``
   mode, install NetCDF-C with NetCDF4/HDF5 and zlib support by omitting
-  ``--disable-netcdf-4``. Here, the :attr:`--prefix` determines the output directory
-  of the build. Then make and install NetCDF:
+  ``--disable-netcdf-4``. For newer NetCDF-C releases, if ``configure`` reports that
+  ``xml2-config`` cannot be found, add ``--disable-libxml2`` to use the bundled XML
+  parser. Here, the :attr:`--prefix` determines the output directory of the build.
+  Then make and install NetCDF:
 
   .. code:: bash
 
