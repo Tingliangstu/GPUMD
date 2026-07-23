@@ -29,8 +29,14 @@ Currently, the following optional arguments are accepted:
 
 * :attr:`compression none|deflate <level>`
 
-  * ``none`` writes an uncompressed NetCDF 64-bit-offset file and is the default.
-  * ``deflate`` writes a losslessly compressed NetCDF4/HDF5 file. :attr:`level` must be from 0 to 9.
+  * ``none`` writes an uncompressed NetCDF file in the 64-bit-offset (CDF-2) format and is the default.
+    Here, 64-bit offset refers to the file layout, not the precision of the coordinates and velocities;
+    these data use 32-bit floating point numbers when the default ``precision single`` is used.
+  * ``deflate`` writes a NetCDF4/HDF5 file using lossless compression and requires NetCDF-C built
+    with NetCDF4/HDF5 and zlib support. :attr:`level` must be an integer from 0 to 9.
+    Level 0 applies no compression, level 1 favors writing speed, and level 9 favors a smaller file
+    at a higher CPU cost. Higher levels usually reduce the file size, but can give diminishing returns;
+    level 1 is a practical starting point for trajectories.
 
 Requirements and specifications
 -------------------------------
@@ -39,7 +45,6 @@ Requirements and specifications
   Instructions for how to set up the `NetCDF package <https://www.unidata.ucar.edu/software/netcdf>`_ can be found :ref:`here <netcdf_setup>`.
 * The NetCDF format follows the `AMBER specifications <http://ambermd.org/netcdf/nctraj.pdf>`_.
 * The ``single`` option is good for saving space and is the default.
-* The ``deflate`` option requires NetCDF-C built with NetCDF4/HDF5 and zlib support.
 * NetCDF output files can be read for example by `VMD <https://www.ks.uiuc.edu/Research/vmd/>`_ or `OVITO <https://ovito.org/>`_ for visualization.
 * The NetCDF files also contain atom types, cell lengths, and angles, which can be used in visualization and analysis software.
 
