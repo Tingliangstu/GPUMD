@@ -173,10 +173,14 @@ The setup instructions are below:
   .. code:: make
 
      INC = -I<path>/include -I./
-     LDFLAGS = -L<path>/lib
+     LDFLAGS = -L<path>/lib -Xlinker=-rpath -Xlinker=<path>/lib
      LIBS = -lcublas -lcusolver -lcufft -lnetcdf
 
-  where :attr:`<path>` should be replaced with the installation path for NetCDF (defined in :attr:`--prefix` of the ``./configure`` command).
+  where :attr:`<path>` should be replaced with the installation path for NetCDF
+  (defined in :attr:`--prefix` of the ``./configure`` command). The ``-L`` option
+  specifies where to find NetCDF while linking, and the ``-rpath`` linker option
+  records this location so that the shared NetCDF library can also be found when
+  running :program:`GPUMD`.
 * Follow the remaining :program:`GPUMD` installation instructions
 
 Following these steps will enable the :ref:`dump_netcdf keyword <kw_dump_netcdf>`.
