@@ -228,14 +228,8 @@ void DUMP_NETCDF::preprocess(
 
   std::string filename_potential = get_filename_potential();
   type_symbols_ = get_atom_symbols(filename_potential);
-  if (type_symbols_.empty()) {
-    PRINT_INPUT_ERROR("Cannot determine element symbols for dump_netcdf.\n");
-  }
   type_label_size_ = 1;
   for (const std::string& symbol : type_symbols_) {
-    if (symbol.empty()) {
-      PRINT_INPUT_ERROR("An empty element symbol cannot be written by dump_netcdf.\n");
-    }
     type_label_size_ = std::max(type_label_size_, symbol.size());
   }
   cpu_type_symbols_.resize(size_t(number_of_atoms_to_dump_) * type_label_size_);
@@ -344,9 +338,6 @@ void DUMP_NETCDF::create_file()
   }
   dimids[2] = type_label_dim;
   NC_CHECK(nc_def_var(ncid, TYPE_STR, NC_CHAR, 3, dimids, &type_var));
-  const char type_long_name[] = "chemical element symbol";
-  NC_CHECK(nc_put_att_text(
-    ncid, type_var, "long_name", strlen(type_long_name), type_long_name));
 
   if (compression_level_ >= 0) {
     const size_t bytes_per_value = precision_ == 1 ? sizeof(float) : sizeof(double);
@@ -361,12 +352,8 @@ void DUMP_NETCDF::create_file()
       NC_CHECK(nc_def_var_chunking(ncid, velocities_var, NC_CHUNKED, chunks));
       NC_CHECK(nc_def_var_deflate(ncid, velocities_var, 1, 1, compression_level_));
     }
-    const size_t max_type_chunk_atoms =
-      std::max<size_t>(1, target_chunk_bytes / type_label_size_);
     size_t type_chunks[3] = {
-      1,
-      std::min<size_t>(number_of_atoms_to_dump_, max_type_chunk_atoms),
-      type_label_size_};
+      1, std::min<size_t>(number_of_atoms_to_dump_, max_chunk_atoms), type_label_size_};
     NC_CHECK(nc_def_var_chunking(ncid, type_var, NC_CHUNKED, type_chunks));
     NC_CHECK(nc_def_var_deflate(ncid, type_var, 1, 1, compression_level_));
   }
@@ -433,20 +420,6 @@ void DUMP_NETCDF::validate_file_definition()
   if (previous_type_label_size != type_label_size_) {
     PRINT_INPUT_ERROR(
       "Cannot append dump_netcdf data with a different element-label width.\n");
-  }
-  nc_type type_type;
-  int type_number_of_dimensions;
-  int type_dimensions[3];
-  NC_CHECK(nc_inq_varndims(ncid, type_var, &type_number_of_dimensions));
-  if (type_number_of_dimensions != 3) {
-    PRINT_INPUT_ERROR("The dump_netcdf type variable has an incompatible layout.\n");
-  }
-  NC_CHECK(nc_inq_vartype(ncid, type_var, &type_type));
-  NC_CHECK(nc_inq_vardimid(ncid, type_var, type_dimensions));
-  if (
-    type_type != NC_CHAR || type_dimensions[0] != frame_dim ||
-    type_dimensions[1] != atom_dim || type_dimensions[2] != type_label_dim) {
-    PRINT_INPUT_ERROR("The dump_netcdf type variable has an incompatible layout.\n");
   }
 
   nc_type coordinate_type;
@@ -553,8 +526,7 @@ void DUMP_NETCDF::write(
       cpu_type_symbols_.begin() + size_t(i) * type_label_size_);
   }
   size_t type_start[3] = {lenp, 0, 0};
-  size_t type_count[3] = {
-    1, size_t(number_of_atoms), type_label_size_};
+  size_t type_count[3] = {1, size_t(number_of_atoms), type_label_size_};
   NC_CHECK(nc_put_vara_text(
     ncid, type_var, type_start, type_count, cpu_type_symbols_.data()));
 
