@@ -95,8 +95,7 @@ Caveats
 * This keyword is not propagating.
   That means, its effect will not be passed from one run to the next.
 * An existing output file is overwritten the first time its name is used in a GPUMD execution.
-* Repeating the keyword with exactly the same filename in later runs of the same GPUMD
-  execution appends to that file. A different filename creates a separate trajectory file.
-  Equivalent path spellings such as ``sed.nc`` and ``./sed.nc`` are not normalized.
+* Repeating the keyword with the same filename in later runs of the same GPUMD execution
+  appends to that file. A different filename creates a separate trajectory file.
 * Group, precision, velocity, and compression settings cannot change while appending to the same file.
 * The new syntax is not compatible with the former ``dump_netcdf <interval> <has_velocity>`` syntax.
