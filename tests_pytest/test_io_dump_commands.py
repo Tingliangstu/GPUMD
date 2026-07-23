@@ -111,7 +111,7 @@ def test_dump_netcdf_default_overwrite_and_append(
         run_in_lines=[
             ('dump_netcdf', [-1, 0, 1, 1, 'sed.nc']),
             ('run', BASE_N_STEPS),
-            ('dump_netcdf', [-1, 0, 1, 1, 'sed.nc']),
+            ('dump_netcdf', [-1, 0, 1, 1, './sed.nc']),
         ],
         expected_output_files=['sed.nc'],
     )

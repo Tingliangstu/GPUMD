@@ -73,10 +73,14 @@ private:
   std::vector<int> cpu_type_to_dump_;
   std::vector<double> cpu_group_position_;
   std::vector<double> cpu_group_velocity_;
+  std::vector<float> cpu_position_float_;
+  std::vector<float> cpu_velocity_float_;
+  std::vector<double> cpu_position_double_;
+  std::vector<double> cpu_velocity_double_;
   GPU_Vector<double> group_position_;
   GPU_Vector<double> group_velocity_;
 
-  int ncid; // NetCDF ID
+  int ncid = -1; // NetCDF ID
   static std::vector<std::string> initialized_files_;
 
   // dimensions
@@ -105,7 +109,6 @@ private:
   void create_file();
   void load_file_definition();
   void validate_file_definition();
-  void open_file();
   void write(
     const double global_time,
     const Box& box,

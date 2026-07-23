@@ -42,8 +42,15 @@ http://ambermd.org/netcdf/nctraj.xhtml
 #include "utilities/gpu_vector.cuh"
 #include "utilities/read_file.cuh"
 #include <algorithm>
+#include <cerrno>
+#include <cctype>
 #include <cmath>
 #include <cstring>
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 
 #define GPUMD_VERSION "5.6"
 
@@ -60,6 +67,86 @@ http://ambermd.org/netcdf/nctraj.xhtml
     if (s != NC_NOERR)                                                                             \
       ERR(s);                                                                                      \
   }
+
+static std::string get_current_working_directory()
+{
+  size_t buffer_size = 256;
+  while (buffer_size <= 1024 * 1024) {
+    std::vector<char> buffer(buffer_size);
+#ifdef _WIN32
+    if (_getcwd(buffer.data(), static_cast<int>(buffer.size())) != nullptr) {
+#else
+    if (getcwd(buffer.data(), buffer.size()) != nullptr) {
+#endif
+      return std::string(buffer.data());
+    }
+    if (errno != ERANGE) {
+      break;
+    }
+    buffer_size *= 2;
+  }
+  fprintf(stderr, "Error: cannot determine the current directory for dump_netcdf.\n");
+  exit(ERRCODE);
+}
+
+static std::string normalize_netcdf_path(std::string path)
+{
+  std::replace(path.begin(), path.end(), '\\', '/');
+  const bool has_drive = path.size() >= 2 && std::isalpha(static_cast<unsigned char>(path[0])) &&
+                         path[1] == ':';
+  const bool is_absolute =
+    (!path.empty() && path[0] == '/') || (has_drive && path.size() >= 3 && path[2] == '/');
+  if (!is_absolute) {
+    std::string current_directory = get_current_working_directory();
+    std::replace(current_directory.begin(), current_directory.end(), '\\', '/');
+    path = current_directory + "/" + path;
+  }
+
+  std::string root;
+  size_t component_start = 0;
+  if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) &&
+      path[1] == ':' && path[2] == '/') {
+    root = path.substr(0, 3);
+    root[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(root[0])));
+    component_start = 3;
+  } else if (path.size() >= 2 && path[0] == '/' && path[1] == '/') {
+    root = "//";
+    component_start = 2;
+  } else {
+    root = "/";
+    component_start = 1;
+  }
+
+  std::vector<std::string> components;
+  size_t start = component_start;
+  while (start <= path.size()) {
+    const size_t end = path.find('/', start);
+    const std::string component =
+      path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+    if (!component.empty() && component != ".") {
+      if (component == "..") {
+        if (!components.empty()) {
+          components.pop_back();
+        }
+      } else {
+        components.push_back(component);
+      }
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    start = end + 1;
+  }
+
+  std::string normalized = root;
+  for (const std::string& component : components) {
+    if (!normalized.empty() && normalized.back() != '/') {
+      normalized += '/';
+    }
+    normalized += component;
+  }
+  return normalized;
+}
 
 const char SPATIAL_STR[] = "spatial";
 const char FRAME_STR[] = "frame";
@@ -149,6 +236,7 @@ void DUMP_NETCDF::parse(
     PRINT_INPUT_ERROR("dump_netcdf filename should not be empty.");
   }
   printf("    into file %s.\n", filename_.c_str());
+  filename_ = normalize_netcdf_path(filename_);
 
   bool precision_seen = false;
   bool compression_seen = false;
@@ -224,6 +312,19 @@ void DUMP_NETCDF::preprocess(
     }
   }
 
+  const size_t frame_values = size_t(number_of_atoms_to_dump_) * 3;
+  if (precision_ == 1) {
+    cpu_position_float_.resize(frame_values);
+    if (has_velocity_) {
+      cpu_velocity_float_.resize(frame_values);
+    }
+  } else {
+    cpu_position_double_.resize(frame_values);
+    if (has_velocity_) {
+      cpu_velocity_double_.resize(frame_values);
+    }
+  }
+
   const bool initialized =
     std::find(initialized_files_.begin(), initialized_files_.end(), filename_) !=
     initialized_files_.end();
@@ -231,7 +332,7 @@ void DUMP_NETCDF::preprocess(
     NC_CHECK(nc_open(filename_.c_str(), NC_WRITE, &ncid));
     load_file_definition();
     validate_file_definition();
-    NC_CHECK(nc_close(ncid));
+    NC_CHECK(nc_inq_dimlen(ncid, frame_dim, &lenp));
   } else {
     create_file();
     initialized_files_.push_back(filename_);
@@ -318,9 +419,9 @@ void DUMP_NETCDF::create_file()
     const size_t bytes_per_value = precision_ == 1 ? sizeof(float) : sizeof(double);
     const size_t target_chunk_bytes = 1024 * 1024;
     const size_t max_chunk_atoms =
-      std::max<size_t>(1, target_chunk_bytes / bytes_per_value);
+      std::max<size_t>(1, target_chunk_bytes / (bytes_per_value * 3));
     size_t chunks[3] = {
-      1, std::min<size_t>(number_of_atoms_to_dump_, max_chunk_atoms), 1};
+      1, std::min<size_t>(number_of_atoms_to_dump_, max_chunk_atoms), 3};
     NC_CHECK(nc_def_var_chunking(ncid, coordinates_var, NC_CHUNKED, chunks));
     NC_CHECK(nc_def_var_deflate(ncid, coordinates_var, 1, 1, compression_level_));
     if (has_velocity_) {
@@ -362,7 +463,7 @@ void DUMP_NETCDF::create_file()
   startp[0] = 2;
   countp[1] = 5;
   NC_CHECK(nc_put_vara_text(ncid, cell_angular_var, startp, countp, "gamma"));
-  NC_CHECK(nc_close(ncid));
+  lenp = 0;
 }
 
 void DUMP_NETCDF::load_file_definition()
@@ -423,12 +524,6 @@ void DUMP_NETCDF::validate_file_definition()
   }
 }
 
-void DUMP_NETCDF::open_file()
-{
-  NC_CHECK(nc_open(filename_.c_str(), NC_WRITE, &ncid));
-  NC_CHECK(nc_inq_dimlen(ncid, frame_dim, &lenp))
-}
-
 void DUMP_NETCDF::write(
   const double global_time,
   const Box& box,
@@ -476,86 +571,59 @@ void DUMP_NETCDF::write(
   if (!box.pbc_z)
     cell_lengths[2] = 0;
 
-  size_t countp[3] = {1, 3, 0}; // 3rd dimension unused until per-atom
-  size_t startp[3] = {lenp, 0, 0};
+  size_t frame_start[1] = {lenp};
+  size_t cell_start[2] = {lenp, 0};
+  size_t cell_count[2] = {1, 3};
   double time = global_time / 1000.0 * TIME_UNIT_CONVERSION; // convert fs to ps
-  NC_CHECK(nc_put_var1_double(ncid, time_var, startp, &time));
-  NC_CHECK(nc_put_vara_double(ncid, cell_lengths_var, startp, countp, cell_lengths));
-  NC_CHECK(nc_put_vara_double(ncid, cell_angles_var, startp, countp, cell_angles));
+  NC_CHECK(nc_put_var1_double(ncid, time_var, frame_start, &time));
+  NC_CHECK(nc_put_vara_double(ncid, cell_lengths_var, cell_start, cell_count, cell_lengths));
+  NC_CHECK(nc_put_vara_double(ncid, cell_angles_var, cell_start, cell_count, cell_angles));
 
   const double natural_to_A_per_ps =
     1.0 / TIME_UNIT_CONVERSION * 1000.0; // * 1000 from A/fs to A/ps
+  size_t atom_start[2] = {lenp, 0};
+  size_t atom_count[2] = {1, size_t(number_of_atoms)};
+  size_t vector_start[3] = {lenp, 0, 0};
+  size_t vector_count[3] = {1, size_t(number_of_atoms), 3};
+  NC_CHECK(nc_put_vara_int(ncid, type_var, atom_start, atom_count, cpu_type.data()));
 
   if (precision_ == 1) // single precision
   {
-    // must convert data
-    std::vector<float> cpu_x(number_of_atoms);
-    std::vector<float> cpu_y(number_of_atoms);
-    std::vector<float> cpu_z(number_of_atoms);
-    std::vector<float> cpu_velocity_x(number_of_atoms);
-    std::vector<float> cpu_velocity_y(number_of_atoms);
-    std::vector<float> cpu_velocity_z(number_of_atoms);
     for (int i = 0; i < number_of_atoms; i++) {
-      cpu_x[i] = static_cast<float>(cpu_position_per_atom[i]);
-      cpu_y[i] = static_cast<float>(cpu_position_per_atom[i + number_of_atoms]);
-      cpu_z[i] = static_cast<float>(cpu_position_per_atom[i + number_of_atoms * 2]);
-      if (has_velocity_) {
-        cpu_velocity_x[i] = static_cast<float>(cpu_velocity_per_atom[i] * natural_to_A_per_ps);
-        cpu_velocity_y[i] =
-          static_cast<float>(cpu_velocity_per_atom[i + number_of_atoms] * natural_to_A_per_ps);
-        cpu_velocity_z[i] =
-          static_cast<float>(cpu_velocity_per_atom[i + number_of_atoms * 2] * natural_to_A_per_ps);
+      for (int dim = 0; dim < 3; ++dim) {
+        cpu_position_float_[i * 3 + dim] =
+          static_cast<float>(cpu_position_per_atom[i + number_of_atoms * dim]);
+        if (has_velocity_) {
+          cpu_velocity_float_[i * 3 + dim] = static_cast<float>(
+            cpu_velocity_per_atom[i + number_of_atoms * dim] * natural_to_A_per_ps);
+        }
       }
     }
-
-    countp[0] = 1;
-    countp[1] = number_of_atoms;
-    countp[2] = 1;
-    NC_CHECK(nc_put_vara_int(ncid, type_var, startp, countp, cpu_type.data()));
-    NC_CHECK(nc_put_vara_float(ncid, coordinates_var, startp, countp, cpu_x.data()));
+    NC_CHECK(nc_put_vara_float(
+      ncid, coordinates_var, vector_start, vector_count, cpu_position_float_.data()));
     if (has_velocity_) {
-      NC_CHECK(nc_put_vara_float(ncid, velocities_var, startp, countp, cpu_velocity_x.data()));
-    }
-    startp[2] = 1;
-    NC_CHECK(nc_put_vara_float(ncid, coordinates_var, startp, countp, cpu_y.data()));
-    if (has_velocity_) {
-      NC_CHECK(nc_put_vara_float(ncid, velocities_var, startp, countp, cpu_velocity_y.data()));
-    }
-    startp[2] = 2;
-    NC_CHECK(nc_put_vara_float(ncid, coordinates_var, startp, countp, cpu_z.data()));
-    if (has_velocity_) {
-      NC_CHECK(nc_put_vara_float(ncid, velocities_var, startp, countp, cpu_velocity_z.data()));
+      NC_CHECK(nc_put_vara_float(
+        ncid, velocities_var, vector_start, vector_count, cpu_velocity_float_.data()));
     }
   } else {
-    countp[0] = 1;
-    countp[1] = number_of_atoms;
-    countp[2] = 1;
-    NC_CHECK(nc_put_vara_int(ncid, type_var, startp, countp, cpu_type.data()));
-    for (int dim = 0; dim < 3; ++dim) {
-      startp[2] = dim;
-      NC_CHECK(nc_put_vara_double(
-        ncid,
-        coordinates_var,
-        startp,
-        countp,
-        cpu_position_per_atom.data() + number_of_atoms * dim));
-    }
-
-    if (has_velocity_) {
-
-      std::vector<double> scaled_velocity(number_of_atoms * 3);
-
+    for (int i = 0; i < number_of_atoms; ++i) {
       for (int dim = 0; dim < 3; ++dim) {
-        startp[2] = dim;
-        for (int i = 0; i < number_of_atoms; ++i) {
-          scaled_velocity[i + number_of_atoms * dim] =
+        cpu_position_double_[i * 3 + dim] =
+          cpu_position_per_atom[i + number_of_atoms * dim];
+        if (has_velocity_) {
+          cpu_velocity_double_[i * 3 + dim] =
             cpu_velocity_per_atom[i + number_of_atoms * dim] * natural_to_A_per_ps;
         }
-        NC_CHECK(nc_put_vara_double(
-          ncid, velocities_var, startp, countp, scaled_velocity.data() + number_of_atoms * dim));
       }
     }
+    NC_CHECK(nc_put_vara_double(
+      ncid, coordinates_var, vector_start, vector_count, cpu_position_double_.data()));
+    if (has_velocity_) {
+      NC_CHECK(nc_put_vara_double(
+        ncid, velocities_var, vector_start, vector_count, cpu_velocity_double_.data()));
+    }
   }
+  ++lenp;
 }
 
 void DUMP_NETCDF::postprocess(
@@ -567,6 +635,8 @@ void DUMP_NETCDF::postprocess(
   const double temperature)
 {
   if (dump_) {
+    NC_CHECK(nc_close(ncid));
+    ncid = -1;
     dump_ = false;
   }
 }
@@ -648,9 +718,7 @@ void DUMP_NETCDF::process(
     cpu_type = &cpu_type_to_dump_;
   }
 
-  open_file();
   write(global_time, box, *cpu_type, *cpu_position, *cpu_velocity);
-  NC_CHECK(nc_close(ncid));
 }
 
 #endif
