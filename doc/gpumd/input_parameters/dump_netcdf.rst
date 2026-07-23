@@ -5,7 +5,8 @@
 :attr:`dump_netcdf`
 ===================
 
-Write the atomic positions (coordinates) and (optionally) velocities in NetCDF format to a user-specified file.
+Write the atomic positions (coordinates) and (optionally) velocities to a user-specified
+NetCDF trajectory file based on the `AMBER 1.0 conventions <http://ambermd.org/netcdf/nctraj.pdf>`_.
 
 
 Syntax
@@ -34,16 +35,15 @@ Currently, the following optional arguments are accepted:
     these data use 32-bit floating point numbers when the default ``precision single`` is used.
   * ``deflate`` writes a NetCDF4/HDF5 file using lossless compression and requires NetCDF-C built
     with NetCDF4/HDF5 and zlib support. :attr:`level` must be an integer from 0 to 9.
-    Level 0 applies no compression, level 1 favors writing speed, and level 9 favors a smaller file
-    at a higher CPU cost. Higher levels usually reduce the file size, but can give diminishing returns;
-    level 1 is a practical starting point for trajectories.
+    Level 0 applies no compression. For large, frequently written trajectories, use ``none`` for
+    maximum write speed, ``deflate 1`` for a practical balance, or ``deflate 9`` when minimizing
+    file size is more important than write speed.
 
 Requirements and specifications
 -------------------------------
 
 * This keyword requires an external package to operate.
   Instructions for how to set up the `NetCDF package <https://www.unidata.ucar.edu/software/netcdf>`_ can be found :ref:`here <netcdf_setup>`.
-* The NetCDF format follows the `AMBER specifications <http://ambermd.org/netcdf/nctraj.pdf>`_.
 * The ``single`` option is good for saving space and is the default.
 * NetCDF output files can be read for example by `VMD <https://www.ks.uiuc.edu/Research/vmd/>`_ or `OVITO <https://ovito.org/>`_ for visualization.
 * The NetCDF files also contain atom types, cell lengths, and angles, which can be used in visualization and analysis software.
@@ -82,8 +82,7 @@ before the :ref:`run command <kw_run>`.
 Caveats
 -------
 
-* Following the `AMBER 1.0 conventions <http://ambermd.org/netcdf/nctraj.pdf>`_, length is in units of Ångström
-  and velocity is in units of Ångström/picosecond.
+* Length is in units of Ångström and velocity is in units of Ångström/picosecond.
 * This keyword is not propagating.
   That means, its effect will not be passed from one run to the next.
 * An existing output file is overwritten the first time its name is used in a GPUMD execution.
