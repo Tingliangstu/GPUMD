@@ -146,9 +146,15 @@ The setup instructions are below:
 
   .. code:: bash
 
-     ./configure --prefix=<path> --disable-dap
+     ./configure --prefix=<path> --disable-netcdf-4 --disable-dap
 
-  Here, the :attr:`--prefix` determines the output directory of the build. Then make and install NetCDF:
+  This configuration supports the default uncompressed NetCDF output and avoids the
+  additional HDF5 and zlib dependencies. To use the optional ``compression deflate``
+  mode, install NetCDF-C with NetCDF4/HDF5 and zlib support by omitting
+  ``--disable-netcdf-4``. For newer NetCDF-C releases, if ``configure`` reports that
+  ``xml2-config`` cannot be found, add ``--disable-libxml2`` to use the bundled XML
+  parser. Here, the :attr:`--prefix` determines the output directory of the build.
+  Then make and install NetCDF:
 
   .. code:: bash
 
@@ -168,7 +174,7 @@ The setup instructions are below:
 
      INC = -I<path>/include -I./
      LDFLAGS = -L<path>/lib
-     LIBS = -lcublas -lcusolver -lnetcdf
+     LIBS = -lcublas -lcusolver -lcufft -lnetcdf
 
   where :attr:`<path>` should be replaced with the installation path for NetCDF (defined in :attr:`--prefix` of the ``./configure`` command).
 * Follow the remaining :program:`GPUMD` installation instructions
