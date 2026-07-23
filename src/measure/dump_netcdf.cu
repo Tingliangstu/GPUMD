@@ -34,6 +34,7 @@ https://ambermd.org/netcdf/nctraj.pdf
 #include "model/atom.cuh"
 #include "model/box.cuh"
 #include "model/group.cuh"
+#include "model/read_xyz.cuh"
 #include "netcdf.h"
 #include "parse_utilities.cuh"
 #include "utilities/common.cuh"
@@ -71,6 +72,7 @@ const char TIME_STR[] = "time";
 const char COORDINATES_STR[] = "coordinates";
 const char VELOCITIES_STR[] = "velocities"; // maybe not use
 const char TYPE_STR[] = "type";
+const char TYPE_LABEL_STR[] = "type_label";
 const char CELL_LENGTHS_STR[] = "cell_lengths";
 const char CELL_ANGLES_STR[] = "cell_angles";
 const char UNITS_STR[] = "units";
@@ -224,6 +226,20 @@ void DUMP_NETCDF::preprocess(
     }
   }
 
+  std::string filename_potential = get_filename_potential();
+  type_symbols_ = get_atom_symbols(filename_potential);
+  if (type_symbols_.empty()) {
+    PRINT_INPUT_ERROR("Cannot determine element symbols for dump_netcdf.\n");
+  }
+  type_label_size_ = 1;
+  for (const std::string& symbol : type_symbols_) {
+    if (symbol.empty()) {
+      PRINT_INPUT_ERROR("An empty element symbol cannot be written by dump_netcdf.\n");
+    }
+    type_label_size_ = std::max(type_label_size_, symbol.size());
+  }
+  cpu_type_symbols_.resize(size_t(number_of_atoms_to_dump_) * type_label_size_);
+
   const size_t frame_values = size_t(number_of_atoms_to_dump_) * 3;
   if (precision_ == 1) {
     cpu_position_float_.resize(frame_values);
@@ -286,6 +302,7 @@ void DUMP_NETCDF::create_file()
     ncid, FRAME_STR, NC_UNLIMITED, &frame_dim)); // unlimited number of steps (can append)
   NC_CHECK(nc_def_dim(ncid, SPATIAL_STR, 3, &spatial_dim));         // number of spatial dimensions
   NC_CHECK(nc_def_dim(ncid, ATOM_STR, number_of_atoms_to_dump_, &atom_dim));
+  NC_CHECK(nc_def_dim(ncid, TYPE_LABEL_STR, type_label_size_, &type_label_dim));
   NC_CHECK(nc_def_dim(ncid, CELL_SPATIAL_STR, 3, &cell_spatial_dim)); // unitcell lengths
   NC_CHECK(nc_def_dim(ncid, CELL_ANGULAR_STR, 3, &cell_angular_dim)); // unitcell angles
   NC_CHECK(nc_def_dim(ncid, LABEL_STR, 10, &label_dim));              // needed for cell_angular
@@ -325,7 +342,11 @@ void DUMP_NETCDF::create_file()
       NC_CHECK(nc_def_var(ncid, VELOCITIES_STR, NC_DOUBLE, 3, dimids, &velocities_var));
     }
   }
-  NC_CHECK(nc_def_var(ncid, TYPE_STR, NC_INT, 2, dimids, &type_var));
+  dimids[2] = type_label_dim;
+  NC_CHECK(nc_def_var(ncid, TYPE_STR, NC_CHAR, 3, dimids, &type_var));
+  const char type_long_name[] = "chemical element symbol";
+  NC_CHECK(nc_put_att_text(
+    ncid, type_var, "long_name", strlen(type_long_name), type_long_name));
 
   if (compression_level_ >= 0) {
     const size_t bytes_per_value = precision_ == 1 ? sizeof(float) : sizeof(double);
@@ -340,10 +361,12 @@ void DUMP_NETCDF::create_file()
       NC_CHECK(nc_def_var_chunking(ncid, velocities_var, NC_CHUNKED, chunks));
       NC_CHECK(nc_def_var_deflate(ncid, velocities_var, 1, 1, compression_level_));
     }
-    size_t type_chunks[2] = {
+    const size_t max_type_chunk_atoms =
+      std::max<size_t>(1, target_chunk_bytes / type_label_size_);
+    size_t type_chunks[3] = {
       1,
-      std::min<size_t>(
-        number_of_atoms_to_dump_, target_chunk_bytes / sizeof(int))};
+      std::min<size_t>(number_of_atoms_to_dump_, max_type_chunk_atoms),
+      type_label_size_};
     NC_CHECK(nc_def_var_chunking(ncid, type_var, NC_CHUNKED, type_chunks));
     NC_CHECK(nc_def_var_deflate(ncid, type_var, 1, 1, compression_level_));
   }
@@ -383,6 +406,7 @@ void DUMP_NETCDF::load_file_definition()
   NC_CHECK(nc_inq_dimid(ncid, FRAME_STR, &frame_dim));
   NC_CHECK(nc_inq_dimid(ncid, SPATIAL_STR, &spatial_dim));
   NC_CHECK(nc_inq_dimid(ncid, ATOM_STR, &atom_dim));
+  NC_CHECK(nc_inq_dimid(ncid, TYPE_LABEL_STR, &type_label_dim));
   NC_CHECK(nc_inq_dimid(ncid, CELL_SPATIAL_STR, &cell_spatial_dim));
   NC_CHECK(nc_inq_dimid(ncid, CELL_ANGULAR_STR, &cell_angular_dim));
   NC_CHECK(nc_inq_dimid(ncid, LABEL_STR, &label_dim));
@@ -402,6 +426,27 @@ void DUMP_NETCDF::validate_file_definition()
   NC_CHECK(nc_inq_dimlen(ncid, atom_dim, &previous_number_of_atoms));
   if (previous_number_of_atoms != size_t(number_of_atoms_to_dump_)) {
     PRINT_INPUT_ERROR("Cannot append dump_netcdf data with a different number of atoms.\n");
+  }
+
+  size_t previous_type_label_size = 0;
+  NC_CHECK(nc_inq_dimlen(ncid, type_label_dim, &previous_type_label_size));
+  if (previous_type_label_size != type_label_size_) {
+    PRINT_INPUT_ERROR(
+      "Cannot append dump_netcdf data with a different element-label width.\n");
+  }
+  nc_type type_type;
+  int type_number_of_dimensions;
+  int type_dimensions[3];
+  NC_CHECK(nc_inq_varndims(ncid, type_var, &type_number_of_dimensions));
+  if (type_number_of_dimensions != 3) {
+    PRINT_INPUT_ERROR("The dump_netcdf type variable has an incompatible layout.\n");
+  }
+  NC_CHECK(nc_inq_vartype(ncid, type_var, &type_type));
+  NC_CHECK(nc_inq_vardimid(ncid, type_var, type_dimensions));
+  if (
+    type_type != NC_CHAR || type_dimensions[0] != frame_dim ||
+    type_dimensions[1] != atom_dim || type_dimensions[2] != type_label_dim) {
+    PRINT_INPUT_ERROR("The dump_netcdf type variable has an incompatible layout.\n");
   }
 
   nc_type coordinate_type;
@@ -493,11 +538,25 @@ void DUMP_NETCDF::write(
 
   const double natural_to_A_per_ps =
     1.0 / TIME_UNIT_CONVERSION * 1000.0; // * 1000 from A/fs to A/ps
-  size_t atom_start[2] = {lenp, 0};
-  size_t atom_count[2] = {1, size_t(number_of_atoms)};
   size_t vector_start[3] = {lenp, 0, 0};
   size_t vector_count[3] = {1, size_t(number_of_atoms), 3};
-  NC_CHECK(nc_put_vara_int(ncid, type_var, atom_start, atom_count, cpu_type.data()));
+  std::fill(cpu_type_symbols_.begin(), cpu_type_symbols_.end(), ' ');
+  for (int i = 0; i < number_of_atoms; ++i) {
+    const int type = cpu_type[i];
+    if (type < 0 || type >= int(type_symbols_.size())) {
+      PRINT_INPUT_ERROR("An atom type is out of range in dump_netcdf.\n");
+    }
+    const std::string& symbol = type_symbols_[type];
+    std::copy(
+      symbol.begin(),
+      symbol.end(),
+      cpu_type_symbols_.begin() + size_t(i) * type_label_size_);
+  }
+  size_t type_start[3] = {lenp, 0, 0};
+  size_t type_count[3] = {
+    1, size_t(number_of_atoms), type_label_size_};
+  NC_CHECK(nc_put_vara_text(
+    ncid, type_var, type_start, type_count, cpu_type_symbols_.data()));
 
   if (precision_ == 1) // single precision
   {

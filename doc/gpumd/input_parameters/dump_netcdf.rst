@@ -53,7 +53,9 @@ Requirements and specifications
   Instructions for how to set up the `NetCDF package <https://www.unidata.ucar.edu/software/netcdf>`_ can be found :ref:`here <netcdf_setup>`.
 * The ``single`` option is good for saving space and is the default.
 * NetCDF output files can be read for example by `VMD <https://www.ks.uiuc.edu/Research/vmd/>`_ or `OVITO <https://ovito.org/>`_ for visualization.
-* The NetCDF files also contain atom types, cell lengths, and angles, which can be used in visualization and analysis software.
+* The NetCDF files also contain the chemical element symbol of every atom in every frame,
+  including type changes made by MCMD, as well as cell lengths and angles. Software such as
+  OVITO can therefore display the element names, colors, and radii directly.
 * The atomic positions are always included in the output. For periodic MD, the wrapped
   positions are written.
 
