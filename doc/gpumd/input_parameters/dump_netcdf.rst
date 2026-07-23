@@ -54,7 +54,8 @@ Requirements and specifications
 * The ``single`` option is good for saving space and is the default.
 * NetCDF output files can be read for example by `VMD <https://www.ks.uiuc.edu/Research/vmd/>`_ or `OVITO <https://ovito.org/>`_ for visualization.
 * The NetCDF files also contain atom types, cell lengths, and angles, which can be used in visualization and analysis software.
-* The wrapped positions will always be included in the output.
+* The atomic positions are always included in the output. For periodic MD, the wrapped
+  positions are written.
 
 Examples
 --------
