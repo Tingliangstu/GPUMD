@@ -174,7 +174,7 @@ The setup instructions are below:
 
      INC = -I<path>/include -I./
      LDFLAGS = -L<path>/lib
-     LIBS = -lcublas -lcusolver -lnetcdf
+     LIBS = -lcublas -lcusolver -lcufft -lnetcdf
 
   where :attr:`<path>` should be replaced with the installation path for NetCDF (defined in :attr:`--prefix` of the ``./configure`` command).
 * Follow the remaining :program:`GPUMD` installation instructions
