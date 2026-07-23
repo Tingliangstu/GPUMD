@@ -419,7 +419,8 @@ void DUMP_NETCDF::validate_file_definition()
   NC_CHECK(nc_inq_dimlen(ncid, type_label_dim, &previous_type_label_size));
   if (previous_type_label_size != type_label_size_) {
     PRINT_INPUT_ERROR(
-      "Cannot append different element symbols to the same NetCDF file. "
+      "Different dump_netcdf commands cannot append different element symbols "
+      "to the same NetCDF file. "
       "Use a different output filename.\n");
   }
 
