@@ -146,9 +146,13 @@ The setup instructions are below:
 
   .. code:: bash
 
-     ./configure --prefix=<path> --disable-dap
+     ./configure --prefix=<path> --disable-netcdf-4 --disable-dap
 
-  Here, the :attr:`--prefix` determines the output directory of the build. Then make and install NetCDF:
+  This configuration supports the default uncompressed NetCDF output and avoids the
+  additional HDF5 and zlib dependencies. To use the optional ``compression deflate``
+  mode, install NetCDF-C with NetCDF4/HDF5 and zlib support by omitting
+  ``--disable-netcdf-4``. Here, the :attr:`--prefix` determines the output directory
+  of the build. Then make and install NetCDF:
 
   .. code:: bash
 
