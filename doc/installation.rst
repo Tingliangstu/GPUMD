@@ -135,18 +135,18 @@ NetCDF setup
 ============
 
 To use `NetCDF <https://www.unidata.ucar.edu/software/netcdf/>`_ (see :ref:`dump_netcdf keyword <kw_dump_netcdf>`) with :program:`GPUMD`, a few extra steps must be taken before building :program:`GPUMD`.
-First, you must download and install the correct version of NetCDF.
-Currently, :program:`GPUMD` is coded to work with `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_ and it is recommended that this version is used (not newer versions).
+First, you must download and install a compatible version of NetCDF.
+:program:`GPUMD` requires netCDF-C 4.6.3 or later; version 4.6.3 remains a known-compatible baseline.
 
 The setup instructions are below:
 
-* Download `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_
+* Download `netCDF-C 4.6.3 <https://github.com/Unidata/netcdf-c/releases/tag/v4.6.3>`_ or a `newer release <https://github.com/Unidata/netcdf-c/releases>`_.
 * Configure and build NetCDF.
   It is best to follow the instructions included with the software but, for the configuration, please use the following flags seen in our example line
 
   .. code:: bash
 
-     ./configure --prefix=<path> --disable-netcdf-4 --disable-dap
+     ./configure --prefix=<path> --disable-dap
 
   Here, the :attr:`--prefix` determines the output directory of the build. Then make and install NetCDF:
 
@@ -168,7 +168,7 @@ The setup instructions are below:
 
      INC = -I<path>/include -I./
      LDFLAGS = -L<path>/lib
-     LIBS = -lcublas -lcusolver -l:libnetcdf.a
+     LIBS = -lcublas -lcusolver -lnetcdf
 
   where :attr:`<path>` should be replaced with the installation path for NetCDF (defined in :attr:`--prefix` of the ``./configure`` command).
 * Follow the remaining :program:`GPUMD` installation instructions
