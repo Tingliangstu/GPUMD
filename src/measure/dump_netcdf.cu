@@ -14,18 +14,18 @@
 */
 
 /*----------------------------------------------------------------------------80
-Dump atom positions using AMBER conventions for NetCDF files. Additional
-readers, such as VMD, OVITO, and ASE, can read/visualize the outputs.
+Write atom types, positions, and optional velocities to NetCDF trajectory
+files. The layout is based on the AMBER 1.0 trajectory conventions, with
+GPUMD extensions for atom types, group metadata, selectable precision, and
+optional NetCDF4 deflate compression.
 
 Contributing authors: Alexander Gabourie (Stanford University)
                       Liang Ting (The Chinese University of Hong Kong)
 
-Code was written for NetCDF version 4.6.3 and the style was influenced by
-LAMMPS' implementation by Lars Pastewka (University of Freiburg). The netCDF
-documentation used can be found here:
-https://www.unidata.ucar.edu/software/netcdf/docs/index.html
-and the AMBER conventions followed are here:
-http://ambermd.org/netcdf/nctraj.xhtml
+The implementation was influenced by LAMMPS' NetCDF output developed by
+Lars Pastewka (University of Freiburg). Documentation can be found at:
+https://docs.unidata.ucar.edu/netcdf-c/current/
+https://ambermd.org/netcdf/nctraj.pdf
 ------------------------------------------------------------------------------*/
 
 #ifdef USE_NETCDF
@@ -42,15 +42,8 @@ http://ambermd.org/netcdf/nctraj.xhtml
 #include "utilities/gpu_vector.cuh"
 #include "utilities/read_file.cuh"
 #include <algorithm>
-#include <cerrno>
-#include <cctype>
 #include <cmath>
 #include <cstring>
-#ifdef _WIN32
-#include <direct.h>
-#else
-#include <unistd.h>
-#endif
 
 #define GPUMD_VERSION "5.6"
 
@@ -67,86 +60,6 @@ http://ambermd.org/netcdf/nctraj.xhtml
     if (s != NC_NOERR)                                                                             \
       ERR(s);                                                                                      \
   }
-
-static std::string get_current_working_directory()
-{
-  size_t buffer_size = 256;
-  while (buffer_size <= 1024 * 1024) {
-    std::vector<char> buffer(buffer_size);
-#ifdef _WIN32
-    if (_getcwd(buffer.data(), static_cast<int>(buffer.size())) != nullptr) {
-#else
-    if (getcwd(buffer.data(), buffer.size()) != nullptr) {
-#endif
-      return std::string(buffer.data());
-    }
-    if (errno != ERANGE) {
-      break;
-    }
-    buffer_size *= 2;
-  }
-  fprintf(stderr, "Error: cannot determine the current directory for dump_netcdf.\n");
-  exit(ERRCODE);
-}
-
-static std::string normalize_netcdf_path(std::string path)
-{
-  std::replace(path.begin(), path.end(), '\\', '/');
-  const bool has_drive = path.size() >= 2 && std::isalpha(static_cast<unsigned char>(path[0])) &&
-                         path[1] == ':';
-  const bool is_absolute =
-    (!path.empty() && path[0] == '/') || (has_drive && path.size() >= 3 && path[2] == '/');
-  if (!is_absolute) {
-    std::string current_directory = get_current_working_directory();
-    std::replace(current_directory.begin(), current_directory.end(), '\\', '/');
-    path = current_directory + "/" + path;
-  }
-
-  std::string root;
-  size_t component_start = 0;
-  if (path.size() >= 3 && std::isalpha(static_cast<unsigned char>(path[0])) &&
-      path[1] == ':' && path[2] == '/') {
-    root = path.substr(0, 3);
-    root[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(root[0])));
-    component_start = 3;
-  } else if (path.size() >= 2 && path[0] == '/' && path[1] == '/') {
-    root = "//";
-    component_start = 2;
-  } else {
-    root = "/";
-    component_start = 1;
-  }
-
-  std::vector<std::string> components;
-  size_t start = component_start;
-  while (start <= path.size()) {
-    const size_t end = path.find('/', start);
-    const std::string component =
-      path.substr(start, end == std::string::npos ? std::string::npos : end - start);
-    if (!component.empty() && component != ".") {
-      if (component == "..") {
-        if (!components.empty()) {
-          components.pop_back();
-        }
-      } else {
-        components.push_back(component);
-      }
-    }
-    if (end == std::string::npos) {
-      break;
-    }
-    start = end + 1;
-  }
-
-  std::string normalized = root;
-  for (const std::string& component : components) {
-    if (!normalized.empty() && normalized.back() != '/') {
-      normalized += '/';
-    }
-    normalized += component;
-  }
-  return normalized;
-}
 
 const char SPATIAL_STR[] = "spatial";
 const char FRAME_STR[] = "frame";
@@ -236,7 +149,6 @@ void DUMP_NETCDF::parse(
     PRINT_INPUT_ERROR("dump_netcdf filename should not be empty.");
   }
   printf("    into file %s.\n", filename_.c_str());
-  filename_ = normalize_netcdf_path(filename_);
 
   bool precision_seen = false;
   bool compression_seen = false;
