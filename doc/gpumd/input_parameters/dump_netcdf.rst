@@ -54,9 +54,7 @@ Requirements and specifications
 * The ``single`` option is good for saving space and is the default.
 * NetCDF output files can be read for example by `VMD <https://www.ks.uiuc.edu/Research/vmd/>`_ or `OVITO <https://ovito.org/>`_ for visualization.
 * The NetCDF files also contain atom types, cell lengths, and angles, which can be used in visualization and analysis software.
-* The ``coordinates`` variable contains the current GPUMD atomic positions. For standard
-  periodic MD these positions are wrapped into the primary cell during force evaluation.
-  Unwrapped positions are not included.
+* The wrapped positions will always be included in the output.
 
 Examples
 --------
