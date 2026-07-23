@@ -14,18 +14,18 @@
 */
 
 /*----------------------------------------------------------------------------80
-Dump atom positions using AMBER conventions for NetCDF files. Additional
-readers, such as VMD, OVITO, and ASE, can read/visualize the outputs.
+Write atom types, positions, and optional velocities to NetCDF trajectory
+files. The layout is based on the AMBER 1.0 trajectory conventions, with
+GPUMD extensions for atom types, group metadata, selectable precision, and
+optional NetCDF4 deflate compression.
 
 Contributing authors: Alexander Gabourie (Stanford University)
                       Liang Ting (The Chinese University of Hong Kong)
 
-Code was written for NetCDF version 4.6.3 and the style was influenced by
-LAMMPS' implementation by Lars Pastewka (University of Freiburg). The netCDF
-documentation used can be found here:
-https://www.unidata.ucar.edu/software/netcdf/docs/index.html
-and the AMBER conventions followed are here:
-http://ambermd.org/netcdf/nctraj.xhtml
+The implementation was influenced by LAMMPS' NetCDF output developed by
+Lars Pastewka (University of Freiburg). Documentation can be found at:
+https://docs.unidata.ucar.edu/netcdf-c/current/
+https://ambermd.org/netcdf/nctraj.pdf
 ------------------------------------------------------------------------------*/
 
 #ifdef USE_NETCDF
