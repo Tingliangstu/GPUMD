@@ -68,12 +68,9 @@ private:
   int precision_ = 1;          // 1 = single precision, 2 = double
   int compression_level_ = -1; // -1 = classic NetCDF, 0-9 = NetCDF4 deflate
   int number_of_atoms_to_dump_ = 0;
-  size_t type_label_size_ = 1;
   std::string filename_;
 
-  std::vector<std::string> type_symbols_;
   std::vector<int> cpu_type_to_dump_;
-  std::vector<char> cpu_type_symbols_;
   std::vector<double> cpu_group_position_;
   std::vector<double> cpu_group_velocity_;
   std::vector<float> cpu_position_float_;
@@ -90,7 +87,6 @@ private:
   int frame_dim;
   int spatial_dim;
   int atom_dim;
-  int type_label_dim;
   int cell_spatial_dim;
   int cell_angular_dim;
   int label_dim;

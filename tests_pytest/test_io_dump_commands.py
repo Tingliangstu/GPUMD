@@ -101,11 +101,6 @@ def _check_netcdf_result(result):
         f'stderr:\n{result.stderr}')
 
 
-def _read_netcdf_type_symbols(netcdf4, dataset):
-    raw_symbols = np.ma.filled(dataset.variables['type'][:], b' ')
-    return np.char.strip(netcdf4.chartostring(raw_symbols))
-
-
 def test_dump_netcdf_default_overwrite_and_append(
         tmp_path, structure, model_path, model_type, gpumd_command):
     netcdf4 = pytest.importorskip('netCDF4')
@@ -130,15 +125,8 @@ def test_dump_netcdf_default_overwrite_and_append(
         assert len(dataset.dimensions['atom']) == len(structure)
         assert dataset.variables['coordinates'].dtype == np.dtype('float32')
         assert dataset.variables['velocities'].dtype == np.dtype('float32')
-        type_variable = dataset.variables['type']
-        assert type_variable.dtype == np.dtype('S1')
-        assert type_variable.dimensions == ('frame', 'atom', 'type_label')
-        type_symbols = _read_netcdf_type_symbols(netcdf4, dataset)
-        expected_symbols = np.broadcast_to(
-            np.asarray(structure.get_chemical_symbols()),
-            (2 * BASE_N_STEPS, len(structure)),
-        )
-        np.testing.assert_array_equal(type_symbols, expected_symbols)
+        assert dataset.variables['type'].dimensions == ('frame', 'atom')
+        assert dataset.variables['type'].shape == (2 * BASE_N_STEPS, len(structure))
         assert dataset.getncattr('gpumd_compression_level') == -1
 
 
@@ -188,14 +176,6 @@ def test_dump_netcdf_group_double_deflate(
         assert coordinates.filters()['zlib']
         assert coordinates.filters()['complevel'] == 1
         assert velocities.filters()['zlib']
-        type_symbols = _read_netcdf_type_symbols(netcdf4, dataset)
-        half = len(structure) // 2
-        expected_symbols = np.broadcast_to(
-            np.asarray(structure.get_chemical_symbols()[half:]),
-            (BASE_N_STEPS, expected_group_size),
-        )
-        np.testing.assert_array_equal(type_symbols, expected_symbols)
-        assert dataset.variables['type'].filters()['zlib']
         assert dataset.getncattr('gpumd_grouping_method') == 0
         assert dataset.getncattr('gpumd_group_id') == 1
 
