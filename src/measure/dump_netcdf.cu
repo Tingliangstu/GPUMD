@@ -436,6 +436,109 @@ void DUMP_NETCDF::validate_file_definition()
   }
 }
 
+static bool build_netcdf_transform(
+  const Box& box, double cell_lengths[3], double cell_angles[3], double transform[9])
+{
+  // AMBER NetCDF stores only cell lengths and angles. Readers reconstruct a
+  // restricted cell with a along +x and b in the xy plane. Use the same
+  // general-to-restricted transformation for every GPUMD cell.
+  const double* h = box.cpu_h;
+  const double a[3] = {h[0], h[3], h[6]};
+  const double b[3] = {h[1], h[4], h[7]};
+  const double c[3] = {h[2], h[5], h[8]};
+  const auto dot = [](const double x[3], const double y[3]) {
+    return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
+  };
+  const auto clamp_cosine = [](double value) {
+    return std::max(-1.0, std::min(1.0, value));
+  };
+
+  cell_lengths[0] = sqrt(dot(a, a));
+  cell_lengths[1] = sqrt(dot(b, b));
+  cell_lengths[2] = sqrt(dot(c, c));
+
+  // The rows of transform are the axes of the restricted NetCDF cell written
+  // in GPUMD Cartesian coordinates.
+  for (int d = 0; d < 3; ++d) {
+    transform[d] = a[d] / cell_lengths[0];
+  }
+  const double bx = transform[0] * b[0] + transform[1] * b[1] + transform[2] * b[2];
+  double by = 0.0;
+  for (int d = 0; d < 3; ++d) {
+    transform[3 + d] = b[d] - bx * transform[d];
+    by += transform[3 + d] * transform[3 + d];
+  }
+  by = sqrt(by);
+  for (int d = 0; d < 3; ++d) {
+    transform[3 + d] /= by;
+  }
+
+  transform[6] = transform[1] * transform[5] - transform[2] * transform[4];
+  transform[7] = transform[2] * transform[3] - transform[0] * transform[5];
+  transform[8] = transform[0] * transform[4] - transform[1] * transform[3];
+  if (transform[6] * c[0] + transform[7] * c[1] + transform[8] * c[2] < 0.0) {
+    for (int d = 0; d < 3; ++d) {
+      transform[6 + d] = -transform[6 + d];
+    }
+  }
+
+  const double cosalpha =
+    clamp_cosine(dot(b, c) / (cell_lengths[1] * cell_lengths[2]));
+  const double cosbeta =
+    clamp_cosine(dot(a, c) / (cell_lengths[0] * cell_lengths[2]));
+  const double cosgamma =
+    clamp_cosine(dot(a, b) / (cell_lengths[0] * cell_lengths[1]));
+  cell_angles[0] = acos(cosalpha) * 180.0 / PI;
+  cell_angles[1] = acos(cosbeta) * 180.0 / PI;
+  cell_angles[2] = acos(cosgamma) * 180.0 / PI;
+
+  bool transform_vectors = false;
+  for (int i = 0; i < 9; ++i) {
+    const double identity_value = i % 4 == 0 ? 1.0 : 0.0;
+    transform_vectors |= fabs(transform[i] - identity_value) > 1.0e-12;
+  }
+  return transform_vectors;
+}
+
+template <typename T>
+static void pack_netcdf_frame(
+  const int number_of_atoms,
+  const bool has_velocity,
+  const bool transform_vectors,
+  const double transform[9],
+  const double velocity_scale,
+  const std::vector<double>& position,
+  const std::vector<double>& velocity,
+  std::vector<T>& packed_position,
+  std::vector<T>& packed_velocity)
+{
+  for (int i = 0; i < number_of_atoms; ++i) {
+    for (int output_dim = 0; output_dim < 3; ++output_dim) {
+      double position_value = position[i + number_of_atoms * output_dim];
+      double velocity_value =
+        has_velocity ? velocity[i + number_of_atoms * output_dim] : 0.0;
+      if (transform_vectors) {
+        position_value = 0.0;
+        velocity_value = 0.0;
+        for (int input_dim = 0; input_dim < 3; ++input_dim) {
+          const double coefficient = transform[output_dim * 3 + input_dim];
+          position_value +=
+            coefficient * position[i + number_of_atoms * input_dim];
+          if (has_velocity) {
+            velocity_value +=
+              coefficient * velocity[i + number_of_atoms * input_dim];
+          }
+        }
+      }
+      packed_position[i * 3 + output_dim] = static_cast<T>(position_value);
+      if (has_velocity) {
+        packed_velocity[i * 3 + output_dim] =
+          static_cast<T>(velocity_value * velocity_scale);
+      }
+    }
+  }
+}
+
 void DUMP_NETCDF::write(
   const double global_time,
   const Box& box,
@@ -445,35 +548,11 @@ void DUMP_NETCDF::write(
 {
   const int number_of_atoms = number_of_atoms_to_dump_;
 
-  //// Write Frame Header ////
-  // Get cell lengths and angles
   double cell_lengths[3];
   double cell_angles[3];
-  if (box.cpu_h[1] != 0 || box.cpu_h[2] != 0 || box.cpu_h[3] != 0 ||
-      box.cpu_h[5] != 0 || box.cpu_h[6] != 0 || box.cpu_h[7] != 0) {
-    const double* t = box.cpu_h;
-    double cosgamma, cosbeta, cosalpha;
-    cell_lengths[0] = sqrt(t[0] * t[0] + t[3] * t[3] + t[6] * t[6]); // a-side
-    cell_lengths[1] = sqrt(t[1] * t[1] + t[4] * t[4] + t[7] * t[7]); // b-side
-    cell_lengths[2] = sqrt(t[2] * t[2] + t[5] * t[5] + t[8] * t[8]); // c-side
-
-    cosgamma = (t[0] * t[1] + t[3] * t[4] + t[6] * t[7]) / (cell_lengths[0] * cell_lengths[1]);
-    cosbeta = (t[0] * t[2] + t[3] * t[5] + t[6] * t[8]) / (cell_lengths[0] * cell_lengths[2]);
-    cosalpha = (t[1] * t[2] + t[4] * t[5] + t[7] * t[8]) / (cell_lengths[1] * cell_lengths[2]);
-
-    cell_angles[0] = acos(cosalpha) * 180.0 / PI;
-    cell_angles[1] = acos(cosbeta) * 180.0 / PI;
-    cell_angles[2] = acos(cosgamma) * 180.0 / PI;
-
-  } else {
-    cell_lengths[0] = box.cpu_h[0];
-    cell_lengths[1] = box.cpu_h[4];
-    cell_lengths[2] = box.cpu_h[8];
-
-    cell_angles[0] = 90;
-    cell_angles[1] = 90;
-    cell_angles[2] = 90;
-  }
+  double cell_transform[9];
+  const bool transform_vectors =
+    build_netcdf_transform(box, cell_lengths, cell_angles, cell_transform);
 
   // Set lengths to 0 if PBC is off
   if (!box.pbc_x)
@@ -501,16 +580,16 @@ void DUMP_NETCDF::write(
 
   if (precision_ == 1) // single precision
   {
-    for (int i = 0; i < number_of_atoms; i++) {
-      for (int dim = 0; dim < 3; ++dim) {
-        cpu_position_float_[i * 3 + dim] =
-          static_cast<float>(cpu_position_per_atom[i + number_of_atoms * dim]);
-        if (has_velocity_) {
-          cpu_velocity_float_[i * 3 + dim] = static_cast<float>(
-            cpu_velocity_per_atom[i + number_of_atoms * dim] * natural_to_A_per_ps);
-        }
-      }
-    }
+    pack_netcdf_frame(
+      number_of_atoms,
+      has_velocity_,
+      transform_vectors,
+      cell_transform,
+      natural_to_A_per_ps,
+      cpu_position_per_atom,
+      cpu_velocity_per_atom,
+      cpu_position_float_,
+      cpu_velocity_float_);
     NC_CHECK(nc_put_vara_float(
       ncid, coordinates_var, vector_start, vector_count, cpu_position_float_.data()));
     if (has_velocity_) {
@@ -518,16 +597,16 @@ void DUMP_NETCDF::write(
         ncid, velocities_var, vector_start, vector_count, cpu_velocity_float_.data()));
     }
   } else {
-    for (int i = 0; i < number_of_atoms; ++i) {
-      for (int dim = 0; dim < 3; ++dim) {
-        cpu_position_double_[i * 3 + dim] =
-          cpu_position_per_atom[i + number_of_atoms * dim];
-        if (has_velocity_) {
-          cpu_velocity_double_[i * 3 + dim] =
-            cpu_velocity_per_atom[i + number_of_atoms * dim] * natural_to_A_per_ps;
-        }
-      }
-    }
+    pack_netcdf_frame(
+      number_of_atoms,
+      has_velocity_,
+      transform_vectors,
+      cell_transform,
+      natural_to_A_per_ps,
+      cpu_position_per_atom,
+      cpu_velocity_per_atom,
+      cpu_position_double_,
+      cpu_velocity_double_);
     NC_CHECK(nc_put_vara_double(
       ncid, coordinates_var, vector_start, vector_count, cpu_position_double_.data()));
     if (has_velocity_) {
